@@ -178,8 +178,13 @@ class Writer:
                 img.save(f"{self.workdir}/images/{step}_{k}.png")
 
     def __del__(self):
-        if jax.process_index() != 0:
-            return
-        if self.use_wandb:
-            wandb.finish()
-            shutil.rmtree("/tmp/wandb", ignore_errors=True)
+        # Guard against interpreter-shutdown errors (jax backend may already
+        # be torn down when __del__ runs).
+        try:
+            if jax.process_index() != 0:
+                return
+            if self.use_wandb:
+                wandb.finish()
+                shutil.rmtree("/tmp/wandb", ignore_errors=True)
+        except Exception:
+            pass
