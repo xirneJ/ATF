@@ -95,12 +95,29 @@ def rel(a, b):
     return abs(a - b) / (abs(a) + 1e-12)
 
 
+def moving_average(values, window):
+    """Centered moving average over a list (None entries are skipped)."""
+    if window <= 1:
+        return values
+    out = []
+    half = window // 2
+    for i in range(len(values)):
+        lo, hi = max(0, i - half), min(len(values), i + half + 1)
+        chunk = [v for v in values[lo:hi] if v is not None]
+        out.append(sum(chunk) / len(chunk) if chunk else None)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--a", required=True, help="run directory / metrics.jsonl / log of run A")
     ap.add_argument("--b", required=True, help="run directory / metrics.jsonl / log of run B")
     ap.add_argument("--keys", nargs="*", default=["loss_vel", "du_dt_abs"],
                     help="which metric keys to compare")
+    ap.add_argument("--smooth", type=int, default=1,
+                    help="moving-average window (in records) for both runs, e.g. 9")
+    ap.add_argument("--every", type=int, default=0,
+                    help="print only every k-th row (0 = auto: 1 if no smoothing else 10)")
     args = ap.parse_args()
 
     try:
@@ -124,24 +141,43 @@ def main():
         return
 
     keys = [k for k in args.keys if any(k in a[s] for s in common)]
+    if not keys:
+        print(f"None of the requested keys {args.keys} found in the records.")
+        return
+
+    # Optionally smooth both curves (useful when batch is small and curves are noisy).
+    series = {}
+    for k in keys:
+        va = [a[s].get(k) for s in common]
+        vb = [b[s].get(k) for s in common]
+        if args.smooth > 1:
+            va = moving_average(va, args.smooth)
+            vb = moving_average(vb, args.smooth)
+        series[k] = (va, vb)
+
+    every = args.every if args.every > 0 else (1 if args.smooth <= 1 else 10)
+    print(f"\nsmooth window = {args.smooth}, printing every {every} record(s)")
+
     header = f"{'step':>6} | " + " | ".join(
         f"{'A.' + k:>13} {'B.' + k:>13} {'rel':>9}" for k in keys
     )
-    print("\n" + header)
+    print(header)
     print("-" * len(header))
     rels = {k: [] for k in keys}
-    for s in common:
+    for i, s in enumerate(common):
         cells = []
         for k in keys:
-            va, vb = a[s].get(k), b[s].get(k)
+            va, vb = series[k][0][i], series[k][1][i]
             r = rel(va, vb)
             if r is not None:
                 rels[k].append(r)
-            cells.append(f"{fmt(va):>13} {fmt(vb):>13} {('%.2e' % r) if r is not None else '-':>9}")
-        print(f"{s:>6} | " + " | ".join(cells))
+            if i % every == 0 or i == len(common) - 1:
+                cells.append(f"{fmt(va):>13} {fmt(vb):>13} {('%.2e' % r) if r is not None else '-':>9}")
+        if cells:
+            print(f"{s:>6} | " + " | ".join(cells))
 
     print("-" * len(header))
-    print(f"common steps: {len(common)}")
+    print(f"common steps: {len(common)} (smooth={args.smooth})")
     for k in keys:
         if rels[k]:
             print(f"  {k}: max rel diff = {max(rels[k]):.2e}, mean = {sum(rels[k]) / len(rels[k]):.2e}")
