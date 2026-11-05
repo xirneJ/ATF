@@ -1,0 +1,71 @@
+# Tiny end-to-end training-loop debug config.
+#
+# Uses `pmfDiT_tiny` (32x32 images, hidden 64, 4 blocks) so the whole pipeline
+# (pmap, FD/jvp derivative, loss, sampling, checkpoint) can be validated in a
+# couple of minutes using ~1-2GB of GPU memory -- useful on shared GPUs where
+# the full B/16 cannot fit.
+#
+# Usage:
+#   python main.py --workdir=<log_dir> --config=configs/load_config.py:pMF_tiny_debug
+
+dataset:
+    root: /path/to/imagenet        # only used when synthetic: False
+    synthetic: True
+    synthetic_samples: 512
+    image_size: 32
+    num_workers: 2
+    prefetch_factor: 2
+    pin_memory: False
+    use_flip: False
+
+model:
+    model_str: pmfDiT_tiny
+    cfg_beta: 1.0
+    P_mean: 0.8
+    P_std: 0.8
+    noise_scale: 1.0
+
+    lpips: False
+    convnext: False
+
+    cheb_order: 3
+    deriv_mode: 'fd'        # 'fd' | 'jvp'
+    fd_central: True
+    fd_delta: 0.02
+    reg_lambda: 0.0
+    teacher_ema: False
+
+training:
+    log_per_step: 5
+    checkpoint_per_epoch: 1
+    num_epochs: 5
+    batch_size: 16
+    learning_rate: 0.001
+    warmup_epochs: 0
+    adam_b2: 0.95
+    ema_type: 'edm'
+    ema_val: [2000]
+    sample_per_epoch: 1
+    fid_per_epoch: 100
+    seed: 42
+    grad_clip_norm: 1.0
+
+fid:
+    device_batch_size: 4
+    num_samples: 16
+    cache_ref: ''
+
+sampling:
+    num_steps: 1
+    omega: 8.5
+    t_min: 0.1
+    t_max: 0.7
+
+logging:
+    use_wandb: False
+    wandb_project: 'YOUR PROJECT'
+    wandb_entity: 'YOUR ENTITY'
+    wandb_tags: []
+    wandb_notes: ''
+
+load_from: ''

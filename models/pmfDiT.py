@@ -465,3 +465,16 @@ pmfDiT_H_32 = partial(
     num_heads=16,
     aux_head_depth=8,
 )
+
+
+# Tiny variant used only for debugging the training loop on small GPUs /
+# shared machines. Not used for any real experiments.
+pmfDiT_tiny = partial(
+    pmfDiT,
+    input_size=32,
+    depth=4,
+    hidden_size=64,
+    patch_size=8,
+    num_heads=4,
+    aux_head_depth=1,
+)

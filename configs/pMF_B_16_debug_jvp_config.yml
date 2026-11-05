@@ -9,7 +9,7 @@
 dataset:
     root: /path/to/imagenet        # only used when synthetic: False
     synthetic: True
-    synthetic_samples: 2048
+    synthetic_samples: 1024
     image_size: 256
     num_workers: 2
     prefetch_factor: 2
@@ -37,12 +37,12 @@ training:
     log_per_step: 10
     checkpoint_per_epoch: 1
     num_epochs: 10
-    batch_size: 32
+    batch_size: 8
     learning_rate: 0.001
     warmup_epochs: 0
     adam_b2: 0.95
     ema_type: 'edm'
-    ema_val: [500, 1000, 2000]
+    ema_val: [2000]
     sample_per_epoch: 1
     fid_per_epoch: 100
     seed: 42
