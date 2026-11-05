@@ -17,6 +17,10 @@ def get_config():
     dataset.prefetch_factor = 4
     dataset.pin_memory = False
 
+    # Debugging only: use a deterministic random dataset instead of ImageNet.
+    dataset.synthetic = False
+    dataset.synthetic_samples = 1024
+
     dataset.image_size = 256
     dataset.image_channels = 3
     dataset.num_classes = 1000

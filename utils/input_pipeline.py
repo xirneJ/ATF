@@ -173,6 +173,33 @@ def worker_init_fn(worker_id, rank):
 
 from torchvision.datasets.folder import pil_loader
 
+
+class SyntheticImageNet:
+    """Deterministic fake image dataset used to debug the training loop.
+
+    It avoids needing ImageNet / FID stats: every index maps to a fixed random
+    uint8 image and a class label. Useful for checking jit/pmap, memory usage
+    and checkpointing on a single GPU.
+    """
+
+    def __init__(self, num_samples, image_size, num_classes, seed=0):
+        self.num_samples = int(num_samples)
+        self.image_size = int(image_size)
+        self.num_classes = int(num_classes)
+        self.seed = int(seed)
+
+    def __len__(self):
+        return self.num_samples
+
+    def __getitem__(self, index):
+        rng = np.random.RandomState((self.seed + index) % (2**31 - 1))
+        image = rng.randint(
+            0, 256, size=(self.image_size, self.image_size, 3), dtype=np.uint8
+        )
+        label = index % self.num_classes
+        return image, label
+
+
 def create_imagenet_split(dataset_cfg, batch_size, split):
     """
     Creates a split from ImageNet using Torchvision Datasets.
@@ -193,14 +220,21 @@ def create_imagenet_split(dataset_cfg, batch_size, split):
         img_cropped = center_crop_arr(img, dataset_cfg.image_size)
         return np.array(img_cropped)  # Returns uint8 array (image_size, image_size, C)
 
-    root = os.path.join(dataset_cfg.root, split)
-    
-    ds = datasets.ImageFolder(
-        root,
-        transform=None,  # No transforms - crop is done in loader
-        loader=loader_with_crop,  # Returns uint8 numpy arrays (image_size, image_size, 3)
-    )
-    log_for_0(ds)
+    if dataset_cfg.get("synthetic", False):
+        ds = SyntheticImageNet(
+            num_samples=dataset_cfg.get("synthetic_samples", 1024),
+            image_size=dataset_cfg.image_size,
+            num_classes=dataset_cfg.num_classes,
+        )
+        log_for_0(f"Using synthetic debug dataset: {ds}")
+    else:
+        root = os.path.join(dataset_cfg.root, split)
+        ds = datasets.ImageFolder(
+            root,
+            transform=None,  # No transforms - crop is done in loader
+            loader=loader_with_crop,  # Returns uint8 numpy arrays (image_size, image_size, 3)
+        )
+        log_for_0(ds)
     sampler = DistributedSampler(
         ds,
         num_replicas=jax.process_count(),

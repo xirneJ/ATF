@@ -13,9 +13,11 @@
 #     preallocation) and lower `training.batch_size` if you hit OOM.
 
 dataset:
-    root: /path/to/imagenet        # must contain train/ and val/
+    root: /path/to/imagenet        # only used when synthetic: False
+    synthetic: True                # deterministic random images; no ImageNet needed
+    synthetic_samples: 2048
     image_size: 256
-    num_workers: 4
+    num_workers: 2
     prefetch_factor: 2
     pin_memory: False
     use_flip: False
