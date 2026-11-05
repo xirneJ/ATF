@@ -21,5 +21,12 @@ def save_checkpoint(state, workdir):
     state = jax.device_get(jax.tree_util.tree_map(lambda x: x[0], state))
     step = int(state.step)
     log_for_0("Saving checkpoint step %d.", step)
-    checkpoints.save_checkpoint_multiprocess(workdir, state, step, keep=3)
+    if hasattr(checkpoints, "save_checkpoint_multiprocess"):
+        checkpoints.save_checkpoint_multiprocess(workdir, state, step, keep=3)
+    else:
+        # Newer flax versions removed the *_multiprocess helper; in this code
+        # every process holds the same replicated params, so each process can
+        # write with overwrite=True (only process 0 should be doing this).
+        if jax.process_index() == 0:
+            checkpoints.save_checkpoint(workdir, state, step, keep=3, overwrite=True)
     log_for_0("Checkpoint step %d saved.", step)

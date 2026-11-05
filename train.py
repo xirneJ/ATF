@@ -8,7 +8,6 @@ import ml_collections
 from flax import jax_utils
 from jax import lax, random
 from functools import partial
-from optax._src.alias import *
 
 from pmf import pixelMeanFlow, generate
 
@@ -200,7 +199,13 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str) -> Train
     _ = p_sample_step.lower({'params': state.params}, sample_idx=vis_sample_idx, **sample_kwargs).compile()
     log_for_0(f'Sampling step compiled in {timer}')
 
-    fid_evaluator = get_fid_evaluator(config, writer)
+    # FID evaluation needs the reference stats file; if it is not configured
+    # (e.g. debugging on a small dataset), skip FID instead of failing.
+    fid_evaluator = (
+        get_fid_evaluator(config, writer) if config.fid.get("cache_ref", "") else None
+    )
+    if fid_evaluator is None:
+        log_for_0("fid.cache_ref is empty; FID evaluation is disabled.")
 
     ########### Training Loop ###########
     metrics_tracker = MetricsTracker()
@@ -259,8 +264,10 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str) -> Train
             save_checkpoint(state, workdir)
 
         ########### FID ###########
-        if (epoch + 1) % config.training.fid_per_epoch == 0 \
-            or (epoch + 1) == config.training.num_epochs:
+        if fid_evaluator is not None and (
+            (epoch + 1) % config.training.fid_per_epoch == 0
+            or (epoch + 1) == config.training.num_epochs
+        ):
             fid_evaluator(state, p_sample_step, step, **sample_kwargs)
     
     # Wait until computations are done before exiting

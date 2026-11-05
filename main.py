@@ -2,7 +2,12 @@
 
 import jax
 
-jax.distributed.initialize()
+# Multi-host runs (TPU pods / GPU clusters) need distributed initialization;
+# single-host runs (e.g. one GPU for debugging) do not, so don't hard-fail.
+try:
+    jax.distributed.initialize()
+except Exception as _e:  # pragma: no cover - depends on the runtime setup
+    print(f"[warn] jax.distributed.initialize() failed, continuing single-process: {_e}")
 
 from absl import app, flags
 from ml_collections import config_flags
