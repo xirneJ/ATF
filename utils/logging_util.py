@@ -90,11 +90,11 @@ class MetricsTracker:
         Incorporate one step's metrics (per-replica JAX arrays) into the running sum.
         Call this once per training step.
         """
-        local_mean = jax.tree_map(self._mean_over_local_devices, metrics_step_tree)
+        local_mean = jax.tree_util.tree_map(self._mean_over_local_devices, metrics_step_tree)
         if self._sum is None:
             self._sum = local_mean
         else:
-            self._sum = jax.tree_map(lambda s, x: s + x, self._sum, local_mean)
+            self._sum = jax.tree_util.tree_map(lambda s, x: s + x, self._sum, local_mean)
         self._n += 1
 
     def finalize(self):
@@ -105,7 +105,7 @@ class MetricsTracker:
         if self._n == 0:
             return {}
 
-        out = jax.tree_map(
+        out = jax.tree_util.tree_map(
             lambda s: float(np.asarray(s / self._n, dtype=np.float64).mean()),
             self._sum,
         )
