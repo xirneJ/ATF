@@ -2,12 +2,18 @@
 Training and evaluation for pixel MeanFlow.
 """
 
+import datetime
+import os
+import socket
+import subprocess
+import time
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 import ml_collections
 from flax import jax_utils
 from jax import lax, random
-from functools import partial
 
 from pmf import pixelMeanFlow, generate
 
@@ -20,6 +26,45 @@ from utils.lr_utils import lr_schedules
 from utils.sample_util import get_fid_evaluator, run_p_sample_step
 from utils.trainstate_util import create_train_state, TrainState
 from utils.auxloss_util import init_auxloss
+
+#######################################################
+#                    Run Records                      #
+#######################################################
+
+
+def _git_commit():
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except Exception:
+        return "unknown"
+
+
+def _build_run_summary(config, workdir, status, step, last_metrics,
+                       started_at, run_start):
+    """Build the dict written to <workdir>/run_summary.json (for paper records)."""
+    return {
+        "status": status,  # "running" | "completed"
+        "config_file": config.get("config_name", ""),
+        "step": int(step),
+        "started_at": started_at,
+        "updated_at": datetime.datetime.now().isoformat(),
+        "duration_sec": round(time.time() - run_start, 2),
+        "hostname": socket.gethostname(),
+        "workdir": workdir,
+        "git_commit": _git_commit(),
+        "jax_version": jax.__version__,
+        "jax_backend": jax.default_backend(),
+        "jax_devices": [str(d) for d in jax.devices()],
+        "process_count": jax.process_count(),
+        "last_metrics": last_metrics,
+        "config": config.to_dict(),
+    }
+
 
 #######################################################
 #                    Train Step                       #
@@ -209,6 +254,9 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str) -> Train
 
     ########### Training Loop ###########
     metrics_tracker = MetricsTracker()
+    run_start = time.time()
+    started_at = datetime.datetime.now().isoformat()
+    last_summary = None
     for epoch in range(epoch_offset, config.training.num_epochs):
         if jax.process_count() > 1:
             train_loader.sampler.set_epoch(epoch)
@@ -256,12 +304,24 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str) -> Train
                     config.training.log_per_step / timer.elapse_with_reset()
                 )
                 summary["epoch"] = epoch
+                last_summary = dict(summary)
                 writer.write_scalars(step + 1, summary)
+                # Refresh run_summary.json so an interrupted run still has records.
+                writer.write_summary(
+                    _build_run_summary(
+                        config, workdir, "running", step + 1, last_summary,
+                        started_at, run_start,
+                    )
+                )
 
         ########### Save Checkpoint ###########
         if (epoch + 1) % config.training.checkpoint_per_epoch == 0 \
             or (epoch + 1) == config.training.num_epochs:
-            save_checkpoint(state, workdir)
+            save_checkpoint(
+                state,
+                workdir,
+                keep=int(config.training.get("checkpoint_keep", 3)),
+            )
 
         ########### FID ###########
         if fid_evaluator is not None and (
@@ -269,7 +329,17 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str) -> Train
             or (epoch + 1) == config.training.num_epochs
         ):
             fid_evaluator(state, p_sample_step, step, **sample_kwargs)
-    
+
+    # Final run summary (also useful if the run was stopped mid-way).
+    writer.write_summary(
+        _build_run_summary(
+            config, workdir, "completed", step + 1, last_summary,
+            started_at, run_start,
+        )
+    )
+    log_for_0(f"Run records saved under {workdir} "
+              f"(config.yaml, metrics.jsonl, run_summary.json)")
+
     # Wait until computations are done before exiting
     jax.random.normal(jax.random.key(0), ()).block_until_ready()
     return state
@@ -286,12 +356,15 @@ def just_evaluate(config: ml_collections.ConfigDict, workdir: str) -> TrainState
     ), "config.load_from must be specified for just_evaluate"
 
     ########### Initialize ###########
+    # set before Writer so the config snapshot includes the eval EMA list
+    config.training.ema_val = config.sampling.emas
     writer = Writer(config, workdir)
+    run_start = time.time()
+    started_at = datetime.datetime.now().isoformat()
 
     rng = random.key(0)
     image_size = config.dataset.image_size
     device_bsz = config.fid.device_batch_size
-    config.training.ema_val = config.sampling.emas
     lr_fn = lr_schedules(config, 1000)  # dummy steps_per_epoch
 
     ########### Create Model ###########
@@ -343,6 +416,11 @@ def just_evaluate(config: ml_collections.ConfigDict, workdir: str) -> TrainState
         f"omega: {omega:.2f}, t_min: {t_min:.2f}, t_max: {t_max:.2f}, ema: {ema}"
     )
     writer.write_scalars(step + 1, summary)
+    writer.write_summary(
+        _build_run_summary(
+            config, workdir, "completed", step + 1, summary, started_at, run_start
+        )
+    )
 
     # Wait until computations are done before exiting
     jax.random.normal(jax.random.key(0), ()).block_until_ready()

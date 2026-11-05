@@ -1,0 +1,37 @@
+{
+  "run_name": "20261105_tiny_fd",
+  "workdir": "/home/xyds25/qiangchen/logs/tiny",
+  "created_at": "2026-11-05T17:53:07",
+  "description": "Tiny-model training run validating the Chebyshev-u + finite-difference derivative refactor (FD variant). Reconstructed from the 2026-11-05 conversation log; original code predates automatic run records.",
+  "reconstructed": true,
+  "reconstruction_note": "Metric values are exactly those printed to stdout in the conversation. Timing metadata approximated from log timestamps. git commit unknown (code state at that time: pre-run-record refactor).",
+  "model_str": "pmfDiT_tiny",
+  "deriv_mode": "fd",
+  "cheb_order": 3,
+  "fd_delta": 0.02,
+  "fd_central": true,
+  "dataset": {
+    "synthetic": true,
+    "root": "/path/to/imagenet",
+    "image_size": 32,
+    "num_classes": 1000
+  },
+  "files": {
+    "readme.md": "human-readable summary of this reconstructed run",
+    "metrics.jsonl": "32 records, one per 5 steps (step 5..160): loss/loss_vel/u_abs/du_dt_abs/loss_reg/lr",
+    "run_summary.json": "reconstructed config, final metrics, compile times, original workdir",
+    "checkpoint_*": "not included here (original checkpoints remain in ~/qiangchen/logs/tiny on the server)",
+    "images/": "not included here (original images remain in ~/qiangchen/logs/tiny on the server)"
+  },
+  "metrics_columns": {
+    "step": "global training step",
+    "epoch": "training epoch index",
+    "loss": "adp_wt-normalized total loss (~1 by construction)",
+    "loss_vel": "raw mean sum(V - v_g)^2 (main convergence signal)",
+    "u_abs": "mean |u| of predicted average velocity",
+    "du_dt_abs": "mean |du/dt| from finite difference",
+    "loss_reg": "higher-order Chebyshev coefficient regularization term",
+    "lr": "learning rate"
+  },
+  "source": "reconstructed from conversation logs (2026-11-05)"
+}

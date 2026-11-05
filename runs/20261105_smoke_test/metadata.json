@@ -1,0 +1,26 @@
+{
+  "run_name": "20261105_smoke_test",
+  "created_at": "2026-11-05",
+  "description": "smoke_test.py numerical self-check: finite-difference du/dt vs exact jax.jvp, on a tiny model, across CPU-fp32 / GPU-TF32 / GPU-highest precision.",
+  "reconstructed": true,
+  "reconstruction_note": "Values taken from the smoke_test.py stdout printed in the 2026-11-05 conversation.",
+  "model_str": "pmfDiT_tiny",
+  "cheb_order": 3,
+  "dataset": {
+    "synthetic": true,
+    "image_size": 32,
+    "num_classes": 10
+  },
+  "files": {
+    "readme.md": "human-readable summary",
+    "smoke_results.json": "best delta / relative error / delta sweep for each precision mode"
+  },
+  "metrics_columns": {
+    "best_delta": "delta that minimizes the finite-difference vs jvp relative error",
+    "best_rel_err": "relative L2 error of du/dt (FD vs jvp) at best_delta",
+    "sweep": "delta -> relative error mapping",
+    "u_norm": "L2 norm of u at the test point",
+    "jvp_du_norm": "L2 norm of the exact jvp du/dt at the test point"
+  },
+  "source": "reconstructed from conversation logs (2026-11-05)"
+}

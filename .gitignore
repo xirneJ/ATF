@@ -6,3 +6,14 @@ tmp/
 config.sh
 
 .DS_Store
+
+# ---------------------------------------------------------------------------
+# Run artifacts: every run writes its records into runs/<run_name>/ inside the
+# repo (config.yaml, metrics.jsonl, run_summary.json, checkpoint_*, images/).
+# Small records can be committed; heavy artifacts must not go into git.
+# ---------------------------------------------------------------------------
+runs/**/checkpoint*
+runs/**/images/
+runs/**/*.log
+runs/**/*.orbax-checkpoint-tmp/
+runs/**/*.tmp

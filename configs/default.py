@@ -48,6 +48,10 @@ def get_config():
 
     training.grad_clip_norm = 1.0  # global grad-norm clip before the optimizer; <=0 disables
 
+    # Number of recent checkpoints to keep. Set to e.g. 1000 (or 0) for paper
+    # runs where you want to keep every checkpoint; keep small to save disk.
+    training.checkpoint_keep = 3
+
     training.lr_schedule = "warmup_const"
     training.warmup_epochs = 0
 

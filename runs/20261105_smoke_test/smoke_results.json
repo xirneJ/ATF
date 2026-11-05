@@ -1,0 +1,54 @@
+{
+  "description": "smoke_test.py numerical self-check, reconstructed from the 2026-11-05 conversation log",
+  "model": "pmfDiT_tiny (32x32, patch=8, hidden=64, depth=4, aux_head_depth=1)",
+  "cheb_order": 3,
+  "config": {
+    "deriv_modes_tested": ["fd", "jvp"],
+    "fd_central": true,
+    "u_norm": 18.712694,
+    "jvp_du_norm": 71.811455
+  },
+  "runs": {
+    "cpu_fp32": {
+      "best_delta": 0.003,
+      "best_rel_err": 4.919e-05,
+      "sweep": {
+        "0.03": 5.142e-03,
+        "0.01": 5.724e-04,
+        "0.003": 4.919e-05,
+        "0.001": 6.688e-05,
+        "0.0003": 2.228e-04
+      },
+      "forward_loss_fd": 0.999998,
+      "forward_grad_norm_fd": 0.279621,
+      "forward_loss_jvp": 0.999998,
+      "forward_grad_norm_jvp": 0.279619,
+      "samples_finite": true
+    },
+    "gpu_tf32": {
+      "best_delta": 0.03,
+      "best_rel_err": 5.651e-03,
+      "sweep": {
+        "0.03": 5.651e-03,
+        "0.01": 6.650e-03,
+        "0.003": 2.184e-02,
+        "0.001": 6.113e-02,
+        "0.0003": 1.678e-01
+      },
+      "note": "TF32 matmul makes the function evaluation noisy; smaller delta is dominated by roundoff."
+    },
+    "gpu_highest_precision": {
+      "best_delta": 0.003,
+      "best_rel_err": 4.973e-05,
+      "sweep": {
+        "0.03": 5.142e-03,
+        "0.01": 5.725e-04,
+        "0.003": 4.973e-05,
+        "0.001": 6.896e-05,
+        "0.0003": 2.266e-04
+      },
+      "note": "JAX_DEFAULT_MATMUL_PRECISION=highest; matches CPU exactly -> confirms TF32 is the cause."
+    }
+  },
+  "conclusion": "FD derivative is correct; on GPU with default TF32 use delta ~0.02, or use fp32/highest precision for small delta."
+}
