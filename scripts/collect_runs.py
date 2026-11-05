@@ -57,11 +57,13 @@ def extract(workdir: Path, data: dict) -> dict:
         "git": str(data.get("git_commit", ""))[:8],
         "model": model.get("model_str", ""),
         "deriv": model.get("deriv_mode", ""),
+        "cheb": model.get("cheb_order", ""),
         "delta": model.get("fd_delta", ""),
         "reg": model.get("reg_lambda", ""),
         "batch": training.get("batch_size", ""),
         "lr": training.get("learning_rate", ""),
         "epochs": training.get("num_epochs", ""),
+        "max_steps": training.get("max_steps", 0),
         "data": "synthetic" if dataset.get("synthetic") else dataset.get("root", ""),
         "loss": short(metrics.get("loss")),
         "loss_vel": short(metrics.get("loss_vel")),
@@ -75,8 +77,9 @@ def extract(workdir: Path, data: dict) -> dict:
 
 
 COLUMNS = [
-    "run", "status", "step", "duration_min", "model", "deriv", "delta", "batch",
-    "data", "loss", "loss_vel", "u_abs", "du_dt_abs", "steps_per_s", "git",
+    "run", "status", "step", "duration_min", "model", "deriv", "cheb", "delta",
+    "batch", "max_steps", "data", "loss", "loss_vel", "u_abs", "du_dt_abs",
+    "steps_per_s", "git",
 ]
 
 

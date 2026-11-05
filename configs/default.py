@@ -48,6 +48,10 @@ def get_config():
 
     training.grad_clip_norm = 1.0  # global grad-norm clip before the optimizer; <=0 disables
 
+    # Stop after this many optimizer steps (0 = run full num_epochs).
+    # Useful for cheap ablation runs.
+    training.max_steps = 0
+
     # Number of recent checkpoints to keep. Set to e.g. 1000 (or 0) for paper
     # runs where you want to keep every checkpoint; keep small to save disk.
     training.checkpoint_keep = 3

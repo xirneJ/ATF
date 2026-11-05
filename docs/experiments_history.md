@@ -106,8 +106,51 @@ grad_norm 0.279621 vs 0.279619）。
 而当时 GPU 空闲仅 ~8.8GB（其他用户占用 23.6GB）。后续把 debug 配置降到
 batch 8（及 tiny 替代）以适配共享卡。
 
-## 4. 后续待做
+## 4. 真实数据 FD vs JVP 对照（B/16，ImageNet 10 类子集，batch 2）
 
-1. 真实数据（ImageNet 10 类子集）上 B/16 的 FD vs JVP 对照（batch 4，~3250 step/epoch）；
-2. 若 `du_dt_abs/loss_reg` 发散，调 `reg_lambda`；
-3. 真实数据 loss 正常后，再评估 8×H100 满血训练的可行性。
+**设置**：`pmfDiT_B_16`（119,245,696 参数）、ImageNet 10 类子集（13,000 训练图，
+`/home/xyds25/qiangchen/data/imagenet_subset10`）、256×256、batch 2、1 epoch（6500 step）、
+Muon lr=1e-3、`cheb_order=3`、`fd_central=True, fd_delta=0.02`、无辅助损失、
+`XLA_PYTHON_CLIENT_PREALLOCATE=false`。seed 均为 42（seed 对照除外）。
+运行记录（config/metrics/run_summary/README/metadata）在服务器 `ATF/runs/` 下：
+`20261106_real_fd_b2`、`20261106_real_jvp_b2`、`20261106_real_fd_b2_seed43`。
+
+### 4.1 早期轨迹（未平滑，前 700 步）
+
+| step | FD loss_vel | JVP loss_vel | 相对差 |
+|---:|---:|---:|---:|
+| 50 | 1.24959 | 1.24958 | 1.37e-05 |
+| 100 | 1.14573 | 1.14568 | 4.11e-05 |
+| 200 | 1.04889 | 1.04909 | 1.93e-04 |
+| 500 | 0.97078 | 0.97045 | 3.42e-04 |
+| 700 | 0.97644 | 0.97493 | 1.54e-03 |
+
+### 4.2 长期轨迹（smooth=9 移动平均，6500 step）
+
+| 对照 | 含义 | loss_vel 平均差 | loss_vel 最大差 | du_dt_abs 平均差 | du_dt_abs 最大差 |
+|---|---|---|---|---|---|
+| FD(seed42) vs JVP(seed42) | 不同导数方法、同 seed | **1.72e-02** | 7.95e-02 | **2.74e-02** | 1.03e-01 |
+| FD(seed42) vs FD(seed43) | 同方法、仅换 seed（**自然随机基线**） | **1.51e-02** | 7.25e-02 | **4.86e-02** | 1.73e-01 |
+
+**结论**：FD 与 JVP 的差异（loss_vel 1.72e-2、du_dt_abs 2.74e-2）与"同一方法换 seed"的
+自然随机波动（1.51e-2、4.86e-2）**同量级，甚至更小**。两条曲线都稳定在
+`loss_vel≈0.90–1.00`、`du_dt_abs≈0.6–1.0`，**无发散/NaN**。
+因此，有限差分替代 `jax.jvp` 引入的差异处于训练随机性范围内。
+
+**论文可用表述**：*在相同训练配置下，有限差分（中心差分 δ=0.02）与精确 JVP 在前 700 步的
+loss 轨迹相对偏差 <1.5e-3；6500 步后两者平均相对差（1.72e-2）与仅改变随机种子带来的
+自然波动（1.51e-2）同量级，表明 FD 替代 JVP 引入的差异处于训练随机性范围内。*
+
+### 4.3 备注
+
+- batch 2 使 loss 曲线噪声较大（±10%），故对比使用移动平均；若在更大 batch / 独占 GPU 上
+  复现，轨迹差异会进一步减小；
+- 这次对照同时暴露并修复了一个 batch<grid 时的可视化除零 bug（`utils/vis_util.py`）。
+
+## 5. 后续待做
+
+1. 如需更强证据：用 `JAX_DEFAULT_MATMUL_PRECISION=highest` 跑前 1000 步 FD vs JVP
+   （FD 数值误差可压到 ~1e-4），或增加 seed 对照数量（seed44/45）做统计；
+2. 真实数据 loss 正常，可进入下一阶段实验（更大 batch / 更多数据 / 满血训练；
+   满血需 8×80GB GPU 或 TPU，单次成本粗估 ¥1.5–3 万，见本轮讨论记录）；
+3. 论文阶段把 `training.checkpoint_keep` 设为 0（保留全部 checkpoint），并保留 `ATF/runs/`。

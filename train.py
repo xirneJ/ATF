@@ -257,6 +257,8 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str) -> Train
     run_start = time.time()
     started_at = datetime.datetime.now().isoformat()
     last_summary = None
+    max_steps = int(config.training.get("max_steps", 0))
+    reached_max_steps = False
     for epoch in range(epoch_offset, config.training.num_epochs):
         if jax.process_count() > 1:
             train_loader.sampler.set_epoch(epoch)
@@ -313,6 +315,26 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str) -> Train
                         started_at, run_start,
                     )
                 )
+
+            if max_steps > 0 and (step + 1) >= max_steps:
+                reached_max_steps = True
+                log_for_0(f"Reached max_steps={max_steps}; stopping training.")
+                break
+
+        if reached_max_steps:
+            # Final metrics record + checkpoint so the ablation run is complete.
+            writer.write_summary(
+                _build_run_summary(
+                    config, workdir, "completed", step + 1, last_summary,
+                    started_at, run_start,
+                )
+            )
+            save_checkpoint(
+                state,
+                workdir,
+                keep=int(config.training.get("checkpoint_keep", 3)),
+            )
+            break
 
         ########### Save Checkpoint ###########
         if (epoch + 1) % config.training.checkpoint_per_epoch == 0 \
