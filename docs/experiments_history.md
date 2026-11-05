@@ -147,10 +147,52 @@ loss 轨迹相对偏差 <1.5e-3；6500 步后两者平均相对差（1.72e-2）�
   复现，轨迹差异会进一步减小；
 - 这次对照同时暴露并修复了一个 batch<grid 时的可视化除零 bug（`utils/vis_util.py`）。
 
-## 5. 后续待做
+## 5. 消融实验（10 类子集，batch 2，2000 step，seed 42）
+
+统一协议：B/16、ImageNet 10 类子集、batch 2、256²、Muon lr=1e-3、global clip 1.0、
+`training.max_steps=2000`；每个消融只改一个变量。指标为**前 2000 步的平均 loss_vel**
+（越低越好；`adp_wt` 归一化后的 `loss` 恒为 1，不能用）。
+
+| run | 变化 | mean_loss_vel | last_loss_vel | 相对基线 | 结论 |
+|---|---|---:|---:|---:|---|
+| `20261106_real_fd_b2` | 基线（K=3, δ=0.02, 中心差分, reg=0） | 0.9898 | 0.9729 | — | — |
+| `20261106_real_jvp_b2` | 精确 JVP（对照） | 0.9893 | 0.9736 | −0.05% | 再次印证 FD≈JVP |
+| `20261106_real_fd_b2_seed43` | 仅换 seed=43（随机基线） | 0.9919 | 0.9726 | +0.2% | seed 噪声（均值层面）约 0.2% |
+| `abl_cheb0` | K=0（无时间基） | 0.9958 | 0.9602 | **+0.6%** | 无多项式基最差 → 基有正收益 |
+| `abl_cheb1` | K=1 | 0.9837 | 0.9685 | **−0.6%** | 优于 K=3 |
+| `abl_cheb2` | K=2 | **0.9788** | 0.9619 | **−1.1%** | 本轮最好（单 seed，待多 seed 确认） |
+| `abl_delta001` | δ=0.01 | 0.9888 | 0.9710 | −0.1% | 与 0.02 持平 |
+| `abl_delta005` | δ=0.05 | 1.0070 | 1.0090 | **+1.7%** | δ 偏大明显变差（截断误差） |
+| `abl_forward` | 前向差分（central=False） | 1.0420 | 1.1250 | **+5.3%** | 明显更差且出现 loss 尖峰 → 中心差分必要 |
+| `abl_reg1e3` | reg_lambda=1e-3 | 0.9888 | 0.9690 | −0.1% | loss 不变；`du_dt_abs` 末端 0.809 vs 0.819（基线），正则效果弱 |
+
+**当前结论**：
+1. **中心差分必要**：前向差分 loss 平均高 5.3%，且在 step 1750–1900 出现 1.4+ 的 loss 尖峰，训练更不稳；
+2. **δ=0.01–0.02 是安全区间**，δ=0.05 明显变差（+1.7%）→ 默认 0.02 合理（GPU-TF32 下不宜更小）；
+3. **Chebyshev 时间基有正收益但幅度小，且阶数排序非单调**：K=0 最差（+0.6%），
+   K=1/2/3 分别为 −0.6% / −1.1% / —，即 **K=2 最好、K=3 反而不如 K=1/2**（差距 ≤1.1%，
+   单 seed 噪声约 0.2%）→ 说明阶数不需要高、K=3 可能略过参数化；**需多 seed 确认**后
+   再决定是否把默认 `cheb_order` 从 3 降到 2；
+4. `reg_lambda=1e-3` 对 `loss_vel` 基本无影响（−0.1%），`du_dt_abs` 末端 0.809 vs 0.819、
+   `loss_reg` 仍 ~0.085 → 短程 2000 step 下正则效果弱；保留默认关闭即可。
+
+**待补：K 的多 seed 统计**（配置已加：`configs/ablation/cheb2_seed43_config.yml`、
+`cheb2_seed44_config.yml`、`cheb3_seed44_config.yml`；对照 `abl_cheb2`(seed42) 与
+`20261106_real_fd_b2_seed43`(K=3,seed43)）。判断标准：若 K=2 在 3 个 seed 上平均仍优于
+K=3（差距 >2× seed 标准差），则把默认 `cheb_order` 从 3 改为 2；否则保留 3 并写"无显著差异"。
+
+**注意**：`du_dt_abs` 的量级依赖参数化方式（K=0 无显式 t 依赖，早期 `du_dt_abs` 小两个量级），
+**跨 K 不可比**；只有 δ、中心/前向这些同 K 的对比才可用 `du_dt_abs`。
+
+**局限**：单 seed、batch 2、仅 2000 step、loss 层面（无 FID）；结论为"方向性"，
+小差异（≤0.6%）需要多 seed 或更长训练确认。
+
+## 6. 后续待做
 
 1. 如需更强证据：用 `JAX_DEFAULT_MATMUL_PRECISION=highest` 跑前 1000 步 FD vs JVP
    （FD 数值误差可压到 ~1e-4），或增加 seed 对照数量（seed44/45）做统计；
-2. 真实数据 loss 正常，可进入下一阶段实验（更大 batch / 更多数据 / 满血训练；
-   满血需 8×80GB GPU 或 TPU，单次成本粗估 ¥1.5–3 万，见本轮讨论记录）；
-3. 论文阶段把 `training.checkpoint_keep` 设为 0（保留全部 checkpoint），并保留 `ATF/runs/`。
+2. 补齐 K 消融的**多 seed** 统计（K=0/1/3 各 2–3 个 seed），确认"K 阶数影响"是否超过噪声；
+3. **生成质量（FID/IS）**：先做 FID 管线自检（子集参考统计量 + 已有 checkpoint），
+   再决定 pilot 或直接 full-scale（ImageNet-256、8×H100，粗估 ¥1.5–3 万 / 3–5 天）；
+   详见 `docs/generation_eval_plan.md`；
+4. 论文阶段把 `training.checkpoint_keep` 设为 0（保留全部 checkpoint），并保留 `ATF/runs/`。
