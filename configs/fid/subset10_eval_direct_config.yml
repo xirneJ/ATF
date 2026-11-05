@@ -1,0 +1,77 @@
+# Evaluate a TRADITIONAL-pMF-style checkpoint (direct u + t conditioning + jvp):
+# one-step sampling + subset FID/IS over a CFG grid.
+#
+# 1) Set `load_from` below to a checkpoint directory, e.g.
+#       runs/subset10_pilot_direct/checkpoint_11000
+# 2) Run:
+#       python main.py --workdir=runs/eval_subset10_direct \
+#           --config=configs/load_config.py:fid/subset10_eval_direct
+#
+# NOTE: this config must match the architecture of the checkpoint being
+# evaluated (this one = traditional pMF baseline: cheb_order=0, t_cond=True, jvp).
+
+dataset:
+    root: /home/xyds25/qiangchen/data/imagenet_subset10_split
+    synthetic: False
+    synthetic_samples: 1024
+    image_size: 256
+    num_classes: 10
+    num_workers: 4
+    prefetch_factor: 2
+    pin_memory: False
+    use_flip: False
+
+model:
+    model_str: pmfDiT_B_16
+    num_classes: 10
+    cfg_beta: 1.0
+    P_mean: 0.8
+    P_std: 0.8
+    noise_scale: 1.0
+    lpips: False
+    convnext: False
+    cheb_order: 0
+    t_cond: True
+    deriv_mode: 'jvp'
+    fd_central: True
+    fd_delta: 0.02
+    reg_lambda: 0.0
+    teacher_ema: False
+
+training:
+    log_per_step: 50
+    checkpoint_per_epoch: 100
+    num_epochs: 1
+    batch_size: 2
+    learning_rate: 0.001
+    warmup_epochs: 0
+    adam_b2: 0.95
+    ema_type: 'edm'
+    ema_val: [2000]
+    sample_per_epoch: 100
+    fid_per_epoch: 1
+    seed: 42
+    grad_clip_norm: 1.0
+
+fid:
+    device_batch_size: 8
+    num_samples: 3000
+    cache_ref: /home/xyds25/qiangchen/data/fid/subset10_ref.npz
+
+sampling:
+    num_steps: 1
+    num_classes: 10
+    emas: [2000]
+    interval: [[0.1, 0.7]]
+    omegas: [1.0, 2.0, 4.0, 8.5]
+
+logging:
+    use_wandb: False
+    wandb_project: 'YOUR PROJECT'
+    wandb_entity: 'YOUR ENTITY'
+    wandb_tags: []
+    wandb_notes: ''
+
+# >>> set this to the checkpoint to evaluate <<<
+load_from: ''
+eval_only: True

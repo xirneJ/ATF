@@ -52,6 +52,21 @@ python scripts/ablation_summary.py --root runs --steps 2000 --md docs/ablation_t
 注意：这些消融是 **loss 层面**的（batch 2、10 类子集、2000 step），噪声较大；
 判断时应看"平坦均值/趋势"，不要抠单点差异（`--smooth` 可用在 compare_logs 上）。
 
+### ⚠️ 跨 K 比较时不要看 `du_dt_abs`
+
+`du_dt_abs` 的**量级本身依赖参数化方式**，不能跨 Chebyshev 阶数比较：
+
+- K≥1：u 显式含 `T_k(2t-1)`，FD 的 `du/dt` 包含基函数随 t 的变化 → 早期 `du_dt_abs` 就很大；
+- K=0：u 无显式 t 依赖，`du/dt` 只来自沿流 z/h 的隐式变化 → 早期极小、后期才追上。
+
+实测 `abl_cheb0` vs 基线（K=3）：step50 的 `du_dt_abs` 相差约两个量级（0.002 vs 0.13），
+这属于**结构性差异**而非训练好坏。正确做法：
+
+- 跨 K 的消融（cheb0/1/2）**只比较 `loss_vel`**；
+- `du_dt_abs` 只在同 K 的不同设置（δ、中心/前向）之间比较；
+- `ablation_summary.py` 输出里的 `mean_du_dt_abs` 列对 cheb0 行请忽略。
+
+
 ## 记录位置
 
 - 每个 run：`ATF/runs/abl_<axis>/`（`config.yaml`、`metrics.jsonl`、

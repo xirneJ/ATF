@@ -116,6 +116,11 @@ class pixelMeanFlow(nn.Module):
     reg_lambda: float = 0.0
     teacher_ema: bool = False
 
+    # Whether the network receives t directly (traditional pMF-style baseline;
+    # use together with cheb_order=0 and deriv_mode='jvp'). Default False:
+    # t enters only through the Chebyshev basis.
+    t_cond: bool = False
+
     # perceptual
     lpips: bool = False
     lpips_lambda: float = 1.0
@@ -142,6 +147,7 @@ class pixelMeanFlow(nn.Module):
             name="net",
             num_classes=self.num_classes,
             num_basis=self.cheb_order + 1,
+            t_cond=self.t_cond,
             eval=self.eval,
         )
 

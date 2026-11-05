@@ -81,6 +81,7 @@ def get_config():
     # Chebyshev parameterization of the average velocity u and derivative
     # estimation (finite difference along the flow by default)
     model.cheb_order = 3
+    model.t_cond = False  # True + cheb_order=0 + deriv_mode='jvp' = traditional pMF baseline
     model.deriv_mode = "fd"  # "fd" | "jvp"
     model.fd_delta = 1e-3
     model.fd_central = False

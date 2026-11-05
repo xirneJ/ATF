@@ -154,6 +154,13 @@ class pmfDiT(nn.Module):
     # The final layer outputs num_basis * in_channels channels.
     num_basis: int = 4
 
+    # Whether the network receives t directly. Traditional pMF predicts
+    # u(z_t, t, h) from a network that takes t as input; our refactor replaces
+    # that t-conditioning with a Chebyshev basis over t. Set t_cond=True (with
+    # num_basis=1 / cheb_order=0 and deriv_mode='jvp') to emulate traditional
+    # pMF as a baseline.
+    t_cond: bool = False
+
     num_class_tokens: int = 8
     num_time_tokens: int = 4
     num_cfg_tokens: int = 4
@@ -200,6 +207,9 @@ class pmfDiT(nn.Module):
         self.cfg_t_start_embedder = TimestepEmbedder(**embed_kwargs)
         self.cfg_t_end_embedder = TimestepEmbedder(**embed_kwargs)
         self.y_embedder = LabelEmbedder(self.num_classes, **embed_kwargs)
+        if self.t_cond:
+            # Traditional pMF-style t conditioning (baseline only).
+            self.t_embedder = TimestepEmbedder(**embed_kwargs)
 
         token_initializer = nn.initializers.normal(
             stddev=self.token_init_constant / math.sqrt(self.hidden_size)
@@ -316,6 +326,9 @@ class pmfDiT(nn.Module):
         y_embed = self.y_embedder(y)
 
         time_tokens = self.time_tokens + unsqueeze(h_embed, 1)
+        if self.t_cond:
+            t_embed = self.t_embedder(t)
+            time_tokens = time_tokens + unsqueeze(t_embed, 1)
         omega_tokens = self.omega_tokens + unsqueeze(omega_embed, 1)
         t_min_tokens = self.t_min_tokens + unsqueeze(t_min_embed, 1)
         t_max_tokens = self.t_max_tokens + unsqueeze(t_max_embed, 1)
