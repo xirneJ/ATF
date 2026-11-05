@@ -42,6 +42,8 @@ def get_config():
     training.adam_b2 = 0.95
     training.ema_val = [0.9999]
 
+    training.grad_clip_norm = 1.0  # global grad-norm clip before the optimizer; <=0 disables
+
     training.lr_schedule = "warmup_const"
     training.warmup_epochs = 0
 
@@ -63,6 +65,15 @@ def get_config():
     # Training Dynamics
     model.norm_p = 1.0
     model.norm_eps = 0.01
+
+    # Chebyshev parameterization of the average velocity u and derivative
+    # estimation (finite difference along the flow by default)
+    model.cheb_order = 3
+    model.deriv_mode = "fd"  # "fd" | "jvp"
+    model.fd_delta = 1e-3
+    model.fd_central = False
+    model.reg_lambda = 0.0  # weight for higher-order coefficient regularization
+    model.teacher_ema = False  # reserved; not implemented yet
 
     # ------------------------------------------------------------
     # Sampling

@@ -133,8 +133,9 @@ class FinalLayer(nn.Module):
 
 class pmfDiT(nn.Module):
     """
-    A shared backbone processes the first (depth - aux_head_depth) layers.
-    Two heads of equal depth (aux_head_depth) branch off afterwards.
+    A shared backbone processes the first (depth - aux_head_depth) layers, then
+    a u head of depth aux_head_depth predicts the Chebyshev coefficients of the
+    average velocity u.
     """
 
     input_size: int = 256
@@ -148,6 +149,11 @@ class pmfDiT(nn.Module):
 
     aux_head_depth: int = 8
 
+    # Number of Chebyshev basis functions used to parameterize the average
+    # velocity: u(z, t, h) = sum_k coeff_k(z, h) * T_k(2t - 1).
+    # The final layer outputs num_basis * in_channels channels.
+    num_basis: int = 4
+
     num_class_tokens: int = 8
     num_time_tokens: int = 4
     num_cfg_tokens: int = 4
@@ -157,6 +163,8 @@ class pmfDiT(nn.Module):
     embedding_init_constant: float = 1.0
     weight_init_constant: float = 0.32
 
+    # Kept for API compatibility; the auxiliary v head has been removed, so
+    # this flag no longer changes the architecture.
     eval: bool = False
 
     def setup(self):
@@ -165,8 +173,9 @@ class pmfDiT(nn.Module):
          - Patch embedder for input images.
          - Embedders for time, omega, cfg intervals, and class labels.
          - Learnable tokens for conditioning.
-         - Transformer blocks with shared backbone and dual heads.
-         - Final projection layers for u and v outputs.
+         - Transformer blocks: shared backbone + u head.
+         - Final projection layer emitting num_basis * in_channels channels
+           (the Chebyshev coefficients of the average velocity u).
         """
 
         self.out_channels = self.in_channels
@@ -262,21 +271,16 @@ class pmfDiT(nn.Module):
         ]
         self.u_heads = [TransformerBlock(**block_kwargs) for _ in range(head_depth)]
 
-        # We don't need the v heads during evaluation
-        self.v_heads = [
-            TransformerBlock(**block_kwargs)
-            for _ in range(head_depth if not self.eval else 0)
-        ]
-
+        # The auxiliary v head has been removed: the final layer now emits the
+        # Chebyshev coefficients of the average velocity u (num_basis groups).
         self.u_final_layer = FinalLayer(
-            self.hidden_size, self.patch_size, self.out_channels
+            self.hidden_size,
+            self.patch_size,
+            self.out_channels * self.num_basis,
         )
-        self.v_final_layer = FinalLayer(
-            self.hidden_size, self.patch_size, self.out_channels
-        ) if not self.eval else lambda x: jnp.zeros((x.shape[0], x.shape[1], self.patch_size * self.patch_size * self.out_channels))
 
-    def unpatchify(self, x):
-        c = self.out_channels
+    def unpatchify(self, x, out_channels):
+        c = out_channels
         p = self.x_embedder.patch_size[0]
         h = w = int(x.shape[1] ** 0.5)
         assert h * w == x.shape[1]
@@ -336,7 +340,6 @@ class pmfDiT(nn.Module):
     def __call__(self, x, t, h, w, t_min, t_max, y):
         """
         Forward pass of the pmfDiT model.
-        Returns the predicted u and v components.
 
         Args:
             x: Input images
@@ -344,10 +347,12 @@ class pmfDiT(nn.Module):
             w: CFG scale
             t_min, t_max: CFG interval
             y: Class labels
-        
+
         Returns:
-            u: Average velocity field
-            v: Instantaneous velocity field
+            coeffs: (B, H, W, num_basis * C) Chebyshev coefficients of the
+                average velocity u(z, t, h) = sum_k coeffs_k * T_k(2t - 1).
+                The superposition with the basis is done in `pmf.pixelMeanFlow`
+                (so that the derivative / FD logic lives next to the loss).
         """
 
         # We don't explicitly condition on time t, only on h = t - r
@@ -357,25 +362,15 @@ class pmfDiT(nn.Module):
         for block in self.shared_blocks:
             seq = block(seq, self.rope_freqs)
 
-        u_seq = v_seq = seq
         for block in self.u_heads:
-            u_seq = block(u_seq, self.rope_freqs)
+            seq = block(seq, self.rope_freqs)
 
-        for block in self.v_heads:
-            v_seq = block(v_seq, self.rope_freqs)
+        u_tokens = seq[:, self.prefix_tokens :]
+        coeffs = self.unpatchify(
+            self.u_final_layer(u_tokens), self.out_channels * self.num_basis
+        )
 
-        u_tokens = u_seq[:, self.prefix_tokens :]
-        v_tokens = v_seq[:, self.prefix_tokens :]
-
-        u = self.unpatchify(self.u_final_layer(u_tokens))
-        v = self.unpatchify(self.v_final_layer(v_tokens))
-
-        t = t.reshape((-1, 1, 1, 1))
-
-        u = (x - u) / jnp.clip(t, 0.05, 1.0)
-        v = (x - v) / jnp.clip(t, 0.05, 1.0)
-
-        return u, v
+        return coeffs
 
 
 #################################################################################

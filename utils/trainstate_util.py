@@ -71,11 +71,19 @@ def create_train_state(
         
     print_params(params["net"])
 
-    tx = optax.contrib.muon(
+    muon = optax.contrib.muon(
         learning_rate=lr_fn,
         adam_b2=config.training.adam_b2,
     )
-    
+
+    # Global gradient clipping before the optimizer step (after the cross-device
+    # mean has been applied in train_step).
+    grad_clip_norm = float(config.training.get("grad_clip_norm", 1.0))
+    if grad_clip_norm > 0:
+        tx = optax.chain(optax.clip_by_global_norm(grad_clip_norm), muon)
+    else:
+        tx = muon
+
     if config.eval_only: tx = optax.sgd(learning_rate=0.0)
     
     state = TrainState.create(

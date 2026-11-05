@@ -70,7 +70,23 @@ def generate(
 
 
 class pixelMeanFlow(nn.Module):
-    """pixel MeanFlow"""
+    """pixel MeanFlow with a Chebyshev-parameterized average velocity.
+
+    The network predicts the average velocity as
+
+        u(z, t, h) = sum_{k=0}^{cheb_order} c_k(z, h, ...) * T_k(2t - 1),
+        h = t - r,
+
+    where T_k are Chebyshev polynomials of the first kind. The instantaneous
+    velocity is recovered from the MeanFlow identity
+
+        v = u + (t - r) * du/dt,
+
+    with du/dt estimated by a finite difference along the flow (default) or by
+    `jax.jvp`. The training target v_g (CFG-guided instantaneous velocity) is
+    unchanged from the original pMF; the teacher is the u head evaluated at
+    h = 0 (u(z, t, t) = v(z, t)).
+    """
 
     # Model and dataset
     model_str: str
@@ -92,8 +108,13 @@ class pixelMeanFlow(nn.Module):
     norm_p: float = 1.0
     norm_eps: float = 0.01
 
-    # Evaluation mode
-    eval: bool = False
+    # Chebyshev parameterization of u and derivative estimation
+    cheb_order: int = 3
+    deriv_mode: str = "fd"  # "fd" | "jvp"
+    fd_delta: float = 1e-3
+    fd_central: bool = False
+    reg_lambda: float = 0.0
+    teacher_ema: bool = False
 
     # perceptual
     lpips: bool = False
@@ -104,14 +125,75 @@ class pixelMeanFlow(nn.Module):
 
     tr_uniform: float = False
 
+    # Evaluation mode
+    eval: bool = False
+
     def setup(self):
         """
         Setup pixel MeanFlow model.
         """
+        if self.teacher_ema:
+            raise NotImplementedError(
+                "teacher_ema is not implemented yet. Keep it False and use the "
+                "shared u head at h=0 as the teacher."
+            )
         net_fn = getattr(pmfDiT, self.model_str)
         self.net: pmfDiT.pmfDiT = net_fn(
-            name="net", num_classes=self.num_classes, eval=self.eval
+            name="net",
+            num_classes=self.num_classes,
+            num_basis=self.cheb_order + 1,
+            eval=self.eval,
         )
+
+    #######################################################
+    #               Chebyshev parameterization            #
+    #######################################################
+
+    def _cheb_basis(self, t):
+        """Chebyshev T_k(2t-1), k=0..cheb_order, each of shape (B, 1, 1, 1)."""
+        x = 2.0 * t - 1.0
+        basis = [jnp.ones_like(x)]
+        if self.cheb_order >= 1:
+            basis.append(x)
+        for k in range(2, self.cheb_order + 1):
+            basis.append(2.0 * x * basis[k - 1] - basis[k - 2])
+        return basis
+
+    def u_theta(self, x, t, h, w, t_min, t_max, y):
+        """Average velocity from the Chebyshev-parameterized network.
+
+        Args:
+            x: noisy image z_t, shape (B, H, W, C)
+            t, h, w, t_min, t_max: conditioning scalars, broadcastable to (B,)
+            y: class labels, shape (B,)
+
+        Returns:
+            u: (B, H, W, C) average velocity
+            coeffs: (B, H, W, cheb_order + 1, C) Chebyshev coefficients
+        """
+        bz = x.shape[0]
+        t_flat = t.reshape(bz)
+        h_flat = h.reshape(bz)
+        w_flat = w.reshape(bz)
+        t_min_flat = t_min.reshape(bz)
+        t_max_flat = t_max.reshape(bz)
+
+        coeffs = self.net(x, t_flat, h_flat, w_flat, t_min_flat, t_max_flat, y)
+
+        k1 = self.cheb_order + 1
+        channels = coeffs.shape[-1] // k1
+        coeffs = coeffs.reshape(
+            bz, coeffs.shape[1], coeffs.shape[2], k1, channels
+        )
+
+        basis = self._cheb_basis(t_flat.reshape(bz, 1, 1, 1))
+        u = jnp.zeros(
+            (bz, coeffs.shape[1], coeffs.shape[2], channels), dtype=coeffs.dtype
+        )
+        for k in range(k1):
+            u = u + coeffs[:, :, :, k, :] * basis[k]
+
+        return u, coeffs
 
     #######################################################
     #                       Solver                        #
@@ -139,7 +221,7 @@ class pixelMeanFlow(nn.Module):
         t_min = jnp.broadcast_to(t_min, (bsz,))
         t_max = jnp.broadcast_to(t_max, (bsz,))
 
-        u = self.u_fn(z_t, t, t - r, omega, t_min, t_max, y=labels)[0]
+        u, _ = self.u_theta(z_t, t, t - r, omega, t_min, t_max, y=labels)
 
         return z_t - jnp.einsum("n,n...->n...", t - r, u)
 
@@ -224,36 +306,9 @@ class pixelMeanFlow(nn.Module):
     #               Training Utils & Guidance             #
     #######################################################
 
-    def u_fn(self, x, t, h, omega, t_min, t_max, y):
-        """
-        Compute the predicted u component from the model.
-        By default, we use auxiliary v-head to predict v component as well.
-
-        Args:
-            x: Noisy image at time t.
-            t: Current time step.
-            h: Time difference t - r.
-            omega: CFG scale.
-            t_min, t_max: Guidance interval.
-            y: Class labels.
-        Returns: (u, v)
-            u: Predicted u (average velocity field).
-            v: Predicted v (instantaneous velocity field).
-        """
-        bz = x.shape[0]
-        return self.net(
-            x,
-            t.reshape(bz),
-            h.reshape(bz),
-            omega.reshape(bz),
-            t_min.reshape(bz),
-            t_max.reshape(bz),
-            y,
-        )
-
     def v_cond_fn(self, x, t, omega, y):
         """
-        Compute the predicted v component conditioned on class labels.
+        Instantaneous velocity from the u head at h = 0 (i.e. u(z, t, t) = v).
 
         Args:
             x: Noisy image at time t.
@@ -262,21 +317,21 @@ class pixelMeanFlow(nn.Module):
             y: Class labels.
 
         Returns:
-            v: Predicted v component.
+            v: Predicted instantaneous velocity.
         """
 
-        # Set h, t_min, t_max to dummy values for v prediction
+        # h = 0, t_min / t_max are dummy values for the instantaneous limit
         h = jnp.zeros_like(t)
         t_min = jnp.zeros_like(t)
         t_max = jnp.ones_like(t)
 
-        v = self.u_fn(x, t, h, omega, t_min, t_max, y=y)[1]
+        v, _ = self.u_theta(x, t, h, omega, t_min, t_max, y=y)
 
         return v
 
     def v_fn(self, x, t, omega, y):
         """
-        Compute both conditioned and unconditioned predicted v components.
+        Compute both conditioned and unconditioned instantaneous velocities.
 
         Args:
             x: Noisy image at time t.
@@ -285,14 +340,14 @@ class pixelMeanFlow(nn.Module):
             y: Class labels.
 
         Returns:
-            v_c: Predicted v component conditioned on class labels.
-            v_u: Predicted v component without class labels.
+            v_c: Predicted v conditioned on class labels.
+            v_u: Predicted v without class labels.
         """
         bz = x.shape[0]
 
         # Create duplicated batch for conditioned and unconditioned predictions
         x = jnp.concatenate([x, x], axis=0)
-        y_null = jnp.array([self.num_classes] * bz)
+        y_null = jnp.full((bz,), self.num_classes, dtype=y.dtype)
         y = jnp.concatenate([y, y_null], axis=0)
         t = jnp.concatenate([t, t], axis=0)
         w = jnp.concatenate([omega, jnp.ones_like(omega)], axis=0)
@@ -349,7 +404,8 @@ class pixelMeanFlow(nn.Module):
 
         Returns:
             v_g: Guided instantaneous velocity at time t, as target for training.
-            v_c: Conditioned instantaneous velocity at time t, for jvp computation.
+            v_c: Conditioned instantaneous velocity at time t, used as the
+                 tangent for the derivative estimate.
         """
 
         # compute CFG target
@@ -385,8 +441,8 @@ class pixelMeanFlow(nn.Module):
         x = images.astype(self.dtype)
         bz = images.shape[0]
 
-        # Instantaneous velocity computation
         t, r, fm_mask = self.sample_tr(bz)
+        h = t - r
 
         rng = self.make_rng("gen")
         rng, rng_used1 = jax.random.split(rng)
@@ -408,18 +464,39 @@ class pixelMeanFlow(nn.Module):
         # Cond dropout (dropout class labels)
         labels, v_g = self.cond_drop(v_t, v_g, labels)
 
-        # Warped u-function for jvp computation
-        def u_fn(z_t, t, r):
-            return self.u_fn(z_t, t, t - r, omega, t_min, t_max, y=labels)
+        # ---- average velocity at (z_t, t, h) ----
+        u1, coeffs1 = self.u_theta(z_t, t, h, omega, t_min, t_max, labels)
 
-        dtdt = jnp.ones_like(t)
-        dtdr = jnp.zeros_like(t)
+        # ---- total derivative du/dt along the flow ----
+        # tangent: (dz/dt, dt/dt, dr/dt) = (v_c, 1, 0)  =>  dh/dt = 1
+        if self.deriv_mode == "fd":
+            dt = jnp.full_like(h, self.fd_delta)
+            dz = self.fd_delta * v_c
+            u_p, _ = self.u_theta(
+                z_t + dz, t + dt, h + dt, omega, t_min, t_max, labels
+            )
+            if self.fd_central:
+                u_m, _ = self.u_theta(
+                    z_t - dz, t - dt, h - dt, omega, t_min, t_max, labels
+                )
+                du_dt = (u_p - u_m) / (2.0 * self.fd_delta)
+            else:
+                du_dt = (u_p - u1) / self.fd_delta
+        elif self.deriv_mode == "jvp":
+            dtdt = jnp.ones_like(t)
+            dhdh = jnp.ones_like(h)
 
-        # Different from original MeanFlow, we use predicted v in the jvp
-        u, du_dt, v = jax.jvp(u_fn, (z_t, t, r), (v_c, dtdt, dtdr), has_aux=True)
+            def _u_fn(zz, tt, hh):
+                return self.u_theta(zz, tt, hh, omega, t_min, t_max, labels)
+
+            (u1, coeffs1), (du_dt, _) = jax.jvp(
+                _u_fn, (z_t, t, h), (v_c, dtdt, dhdh)
+            )
+        else:
+            raise ValueError(f"Unknown deriv_mode: {self.deriv_mode}")
 
         # Our compound function V = u + (t - r) * du/dt
-        V = u + (t - r) * jax.lax.stop_gradient(du_dt)
+        V = u1 + h * jax.lax.stop_gradient(du_dt)
 
         v_g = jax.lax.stop_gradient(v_g)
 
@@ -428,18 +505,23 @@ class pixelMeanFlow(nn.Module):
             return loss / jax.lax.stop_gradient(adp_wt)
 
         # pixel MeanFlow objective is conceptually v-loss
-        loss_u = jnp.sum((V - v_g) ** 2, axis=(1, 2, 3))
-        loss_u = adp_wt_fn(loss_u)
+        loss_vel = jnp.sum((V - v_g) ** 2, axis=(1, 2, 3))
+        loss_vel = adp_wt_fn(loss_vel)
 
-        # auxiliary v-head loss
-        loss_v = jnp.sum((v - v_g) ** 2, axis=(1, 2, 3))
-        loss_v = adp_wt_fn(loss_v)
+        # Regularize the higher-order Chebyshev coefficients (not via adp_wt_fn)
+        if self.cheb_order >= 2:
+            reg = jnp.zeros((bz,), dtype=self.dtype)
+            for k in range(2, self.cheb_order + 1):
+                reg = reg + jnp.mean(coeffs1[:, :, :, k, :] ** 2, axis=(1, 2, 3))
+        else:
+            reg = jnp.zeros((bz,), dtype=self.dtype)
+        loss_reg = jnp.mean(reg)
 
         # aux loss
         if self.convnext or self.lpips:
             assert aux_fn is not None, "auxiliary loss function is not provided."
 
-            pred_x = z_t - t * u
+            pred_x = z_t - t * u1
 
             aux_loss_lpips, aux_loss_convnext = aux_fn(
                 pred_x, x, rng_used2
@@ -457,16 +539,16 @@ class pixelMeanFlow(nn.Module):
         else:
             aux_loss = aux_loss_lpips = aux_loss_convnext = 0.0
 
-        loss = loss_u + loss_v + aux_loss
-
-        loss = loss.mean()  # mean over batch
+        loss = jnp.mean(loss_vel + self.reg_lambda * reg + aux_loss)
 
         dict_losses = {
             "loss": loss,
-            "loss_u": jnp.mean((V - v_g) ** 2),
-            "loss_v": jnp.mean((v - v_g) ** 2),
+            "loss_vel": jnp.mean((V - v_g) ** 2),
+            "loss_reg": loss_reg,
             "aux_loss_lpips": jnp.mean(aux_loss_lpips),
             "aux_loss_convnext": jnp.mean(aux_loss_convnext),
+            "u_abs": jnp.mean(jnp.abs(u1)),
+            "du_dt_abs": jnp.mean(jnp.abs(du_dt)),
         }
 
         return loss, dict_losses
