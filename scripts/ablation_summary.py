@@ -68,7 +68,15 @@ def collect(root: Path, prefix: str, include, steps: int):
         cfg, recs = load_run(d)
         if not recs:
             continue
-        recs = recs[:steps] if steps > 0 else recs
+        # Truncate by *step value* (not by number of records) so that runs with a
+        # different amount of logging history are compared at the same horizon.
+        if steps > 0:
+            recs = [
+                r for r in recs
+                if r.get("step") is not None and int(r["step"]) <= steps
+            ]
+        if not recs:
+            continue
         model = cfg.get("model", {})
         training = cfg.get("training", {})
         dataset = cfg.get("dataset", {})
@@ -83,6 +91,7 @@ def collect(root: Path, prefix: str, include, steps: int):
             "seed": training.get("seed", ""),
             "synthetic": dataset.get("synthetic", ""),
             "steps": len(recs),
+            "last_step": max(int(r["step"]) for r in recs),
         }
         last_n = max(1, int(len(recs) * 0.25))
         last = recs[-last_n:]
@@ -94,7 +103,8 @@ def collect(root: Path, prefix: str, include, steps: int):
 
 
 COLUMNS = [
-    "run", "deriv", "cheb", "delta", "central", "reg", "batch", "seed", "steps",
+    "run", "deriv", "cheb", "delta", "central", "reg", "batch", "seed",
+    "steps", "last_step",
     "mean_loss_vel", "last_loss_vel", "mean_du_dt_abs", "last_du_dt_abs",
     "last_u_abs", "last_loss_reg",
 ]
@@ -116,7 +126,7 @@ def main():
         "20261106_real_fd_b2", "20261106_real_jvp_b2", "20261106_real_fd_b2_seed43",
     ])
     ap.add_argument("--steps", type=int, default=2000,
-                    help="truncate every run to first N logging records (0 = all)")
+                    help="truncate every run to records with step <= STEPS (0 = all)")
     ap.add_argument("--md", default=None, help="optional markdown output path")
     ap.add_argument("--csv", default=None, help="optional csv output path")
     args = ap.parse_args()
