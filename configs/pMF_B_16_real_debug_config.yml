@@ -11,7 +11,7 @@
 #   python main.py --workdir=<log_dir> --config=configs/load_config.py:pMF_B_16_real_debug
 
 dataset:
-    root: /path/to/imagenet_subset10   # <-- change me
+    root: /home/xyds25/qiangchen/data/imagenet_subset10   # created by scripts/prepare_imagenet_subset.py
     synthetic: False
     synthetic_samples: 1024
     image_size: 256
