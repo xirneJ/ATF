@@ -180,7 +180,7 @@ class InceptionV3(nn.Module):
         x = jnp.mean(x, axis=(1, 2), keepdims=True)
 
         # Get pooled features (always returned)
-        pooled_features = jnp.reshape(x, newshape=(x.shape[0], -1))
+        pooled_features = jnp.reshape(x, (x.shape[0], -1))
 
         # Always compute logits if include_head is True
         logits = None
@@ -648,7 +648,7 @@ class InceptionAux(nn.Module):
             dtype=self.dtype,
         )(x, train)
         x = jnp.mean(x, axis=(1, 2))
-        x = jnp.reshape(x, newshape=(x.shape[0], -1))
+        x = jnp.reshape(x, (x.shape[0], -1))
         x = Dense(
             features=self.num_classes,
             params_dict=utils.get(self.params_dict, "fc"),
