@@ -26,11 +26,16 @@ Notes:
 import argparse
 import os
 import random
+import sys
 
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision.datasets.folder import pil_loader
+
+# Allow `python scripts/compute_fid_ref.py` from the repo root: put the repo
+# root on sys.path so `utils` can be imported.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils import fid_util
 from utils.input_pipeline import center_crop_arr
