@@ -64,7 +64,10 @@ def get_fid_evaluator(config, writer):
     """
     Create FID evaluator function.
     """
-    inception_net = fid_util.build_jax_inception()
+    # Inception batch size for the compiled feature extractor. Lower it (e.g. 32)
+    # on shared/small GPUs via `fid.inception_batch_size`.
+    inception_batch = int(config.fid.get("inception_batch_size", 200))
+    inception_net = fid_util.build_jax_inception(batch_size=inception_batch)
     stats_ref = fid_util.get_reference(config.fid.cache_ref)
     run_p_sample_step_inner = run_p_sample_step
 
@@ -74,7 +77,9 @@ def get_fid_evaluator(config, writer):
             state, config, p_sample_step, run_p_sample_step_inner, ema, **kwargs
         )
         # 2) Stats
-        stats = fid_util.compute_stats(samples_all, inception_net)
+        stats = fid_util.compute_stats(
+            samples_all, inception_net, batch_size=inception_batch
+        )
         # 3) Metrics
         metric = {}
 

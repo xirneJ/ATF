@@ -99,6 +99,8 @@ def get_config():
     config.fid = fid = ml_collections.ConfigDict()
     fid.num_samples = 50000
     fid.device_batch_size = 40
+    # Inception feature-extractor batch size (lower on shared/small GPUs).
+    fid.inception_batch_size = 200
     fid.cache_ref = ""
 
     # ------------------------------------------------------------

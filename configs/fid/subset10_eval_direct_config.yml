@@ -56,6 +56,7 @@ training:
 fid:
     device_batch_size: 8
     num_samples: 3000
+    inception_batch_size: 32
     cache_ref: /home/xyds25/qiangchen/data/fid/subset10_ref.npz
 
 sampling:
