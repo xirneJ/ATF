@@ -44,7 +44,7 @@ model:
 training:
     log_per_step: 50
     checkpoint_per_epoch: 5
-    num_epochs: 20
+    num_epochs: 10
     batch_size: 2
     learning_rate: 0.001
     warmup_epochs: 0
@@ -59,6 +59,7 @@ training:
 fid:
     device_batch_size: 8
     num_samples: 3000
+    inception_batch_size: 32
     cache_ref: /home/xyds25/qiangchen/data/fid/subset10_ref.npz
 
 sampling:

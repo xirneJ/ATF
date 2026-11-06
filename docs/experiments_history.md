@@ -205,12 +205,37 @@ loss 轨迹相对偏差 <1.5e-3；6500 步后两者平均相对差（1.72e-2）�
 **局限**：batch 2、10 类子集、loss 层面（无 FID）；结论为"方向性"，
 更小差异（≤0.5%）需更长训练或 FID 级别验证。
 
+### 5.2 传统 pMF 基线检查（direct u + t 输入 + jvp）
+
+为了和"原始 pMF"做生成质量对比，新增了 `t_cond` 开关（默认 False）：
+`t_cond=True + cheb_order=0 + deriv_mode='jvp'` 即传统 pMF（网络接收 t、直接输出 u、jvp 求导）。
+用 `configs/direct_jvp_b2_config.yml` 跑 2000 步验证基线可实现、可训练。
+
+| run | 参数化 | 导数 | mean_loss_vel（前 2000 步） |
+|---|---|---|---:|
+| `20261106_real_fd_b2` | 我们：Chebyshev K=3 | FD | 0.9898 |
+| `20261106_real_jvp_b2` | 我们：Chebyshev K=3 | JVP | 0.9893 |
+| `chk_direct_jvp` | 传统 pMF：direct u + t | JVP | 0.9900 |
+
+**结论**：三者训练损失**等价（差异 ≤0.1%）**——传统 pMF 基线实现正确，
+我们的重构（Chebyshev 参数化 + FD）在 loss 层面与原始 pMF 打平。
+另外发现 `chk_direct_jvp` 与 `abl_cheb0`（K=0 且无 t 输入）几乎重合，因为 t-embedder
+最后一层零初始化、初始输出≈0，说明 K=0 确实接近传统 pMF 行为。
+因此**质量差异只能由 FID 实验判定**（见 `docs/generation_eval_plan.md` 的 pilot/full-scale 方案）。
+
+**FID 管线状态**：已打通并完成自检——子集参考统计量
+（`~/qiangchen/data/fid/subset10_ref.npz`，3000 张真实图）、用已有 checkpoint
+生成 1000 张并算出 FID/IS（`runs/eval_smoke_cheb/`，数值很差属预期，仅验证链路）。
+期间修复了若干兼容问题：jax_fid 权重镜像（HF `hayden-donnelly/inception-v3-fid`）、
+`jnp.reshape(newshape=)` 新 API、`compute_batch_features` 预处理、Inception batch 可配。
+
 ## 6. 后续待做
 
-1. 如需更强证据：用 `JAX_DEFAULT_MATMUL_PRECISION=highest` 跑前 1000 步 FD vs JVP
-   （FD 数值误差可压到 ~1e-4），或增加 seed 对照数量（seed44/45）做统计；
-2. 补齐 K 消融的**多 seed** 统计（K=0/1/3 各 2–3 个 seed），确认"K 阶数影响"是否超过噪声；
-3. **生成质量（FID/IS）**：先做 FID 管线自检（子集参考统计量 + 已有 checkpoint），
-   再决定 pilot 或直接 full-scale（ImageNet-256、8×H100，粗估 ¥1.5–3 万 / 3–5 天）；
+1. **Pilot（推荐先做）**：子集上训练 10 epoch，`ours（K=3+FD）` vs `传统 pMF（direct+jvp）`，
+   每 5 epoch 算 subset FID（`configs/fid/subset10_pilot_b2_config.yml` /
+   `subset10_pilot_direct_jvp_b2_config.yml`）；约 7h。按 FID 相对差决定是否进入 full-scale；
+2. **Full-scale（论文数字）**：ImageNet-256 全量、同协议、8×H100（粗估 ¥1.5–3 万 / 3–5 天），
    详见 `docs/generation_eval_plan.md`；
+3. 如需更强证据：`JAX_DEFAULT_MATMUL_PRECISION=highest` 短程 FD vs JVP（误差压到 ~1e-4），
+   或更多 seed 统计；
 4. 论文阶段把 `training.checkpoint_keep` 设为 0（保留全部 checkpoint），并保留 `ATF/runs/`。
