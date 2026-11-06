@@ -380,34 +380,31 @@ def compute_fid_stats(
 
 
 def compute_batch_features(batch_images, inception_net, batch_size):
-    """Compute Inception features for a batch of images."""
+    """Compute InceptionV3 pooled features for a batch of uint8 NHWC images.
+
+    Preprocessing matches `_preprocess_per_device` used by `compute_stats`:
+    resize to 299x299 (bilinear grid-sample) and normalize to [-1, 1].
+    """
     actual_batch_size = batch_images.shape[0]
     inception_params = inception_net["params"]
     inception_fn = inception_net["fn"]
 
-    # Convert uint8 [0,255] numpy to float32 [0,255] tensor
-    x = torch.tensor(batch_images, dtype=torch.float32)
-    x = x.permute(0, 3, 1, 2)  # BHWC → BCHW for PyTorch
+    # uint8 NHWC -> float32 NHWC -> 299x299 -> [-1, 1]
+    x = jnp.asarray(batch_images, dtype=jnp.float32)
+    x = resize.resize_torch_grid_sample(x, 299, 299)
+    x = (x - 128.0) / 128.0
 
-    # Apply resize and normalization, then convert to JAX format
-    x = resize.forward(x)  # Resize to 299x299 and normalize to [-1,1]
-    x = x.numpy().transpose(0, 2, 3, 1)  # BCHW → BHWC for JAX
-
-    # Pad batch to expected size if needed (for JAX compilation compatibility)
+    # Pad batch to the compiled size (for JAX compilation compatibility)
     if actual_batch_size < batch_size:
-        # Pad with zeros to reach expected batch size
-        padding_size = batch_size - actual_batch_size
-        padding_shape = (padding_size,) + x.shape[1:]
-        padding = np.zeros(padding_shape, dtype=x.dtype)
-        x_padded = np.concatenate([x, padding], axis=0)
-    else:
-        x_padded = x
+        pad = jnp.zeros(
+            (batch_size - actual_batch_size,) + x.shape[1:], dtype=x.dtype
+        )
+        x = jnp.concatenate([x, pad], axis=0)
 
-    # Extract Inception features
-    pred, _, _ = inception_fn(inception_params, jax.lax.stop_gradient(x_padded))
-    pred = pred.squeeze(axis=1).squeeze(axis=1)
+    # Extract Inception features: pooled_features is (B, 2048)
+    pooled_features, _, _ = inception_fn(
+        inception_params, jax.lax.stop_gradient(x)
+    )
+    pooled_features = pooled_features[:actual_batch_size]
 
-    # Return only the features for actual samples (remove padding)
-    pred = pred[:actual_batch_size]
-
-    return jax.device_get(pred)
+    return jax.device_get(pooled_features)
