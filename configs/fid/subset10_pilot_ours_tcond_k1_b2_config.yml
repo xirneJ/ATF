@@ -1,0 +1,69 @@
+# Diagnosis run K1 (generation quality): Chebyshev K=1 + explicit t input + FD.
+# Same protocol as the pilot (10 epochs, subset FID every 5 epochs, seed 42).
+# Context: E1 (K=3, t_cond=True, FD) reached FID_ema 322.99 @50k, while
+# E2 (K=0, t_cond=True, FD) reached 296.79. This run tests whether a *small*
+# Chebyshev order recovers the baseline FID level.
+
+dataset:
+    root: /home/xyds25/qiangchen/data/imagenet_subset10_split
+    synthetic: False
+    synthetic_samples: 1024
+    image_size: 256
+    num_classes: 10
+    num_workers: 4
+    prefetch_factor: 2
+    pin_memory: False
+    use_flip: False
+
+model:
+    model_str: pmfDiT_B_16
+    num_classes: 10
+    cfg_beta: 1.0
+    P_mean: 0.8
+    P_std: 0.8
+    noise_scale: 1.0
+    lpips: False
+    convnext: False
+    cheb_order: 1
+    t_cond: True
+    deriv_mode: 'fd'
+    fd_central: True
+    fd_delta: 0.02
+    reg_lambda: 0.0
+    teacher_ema: False
+
+training:
+    log_per_step: 50
+    checkpoint_per_epoch: 5
+    num_epochs: 10
+    batch_size: 2
+    learning_rate: 0.001
+    warmup_epochs: 0
+    adam_b2: 0.95
+    ema_type: 'edm'
+    ema_val: [2000]
+    sample_per_epoch: 5
+    fid_per_epoch: 5
+    seed: 42
+    grad_clip_norm: 1.0
+
+fid:
+    device_batch_size: 8
+    num_samples: 3000
+    inception_batch_size: 32
+    cache_ref: /home/xyds25/qiangchen/data/fid/subset10_ref.npz
+
+sampling:
+    num_steps: 1
+    omega: 8.5
+    t_min: 0.1
+    t_max: 0.7
+
+logging:
+    use_wandb: False
+    wandb_project: 'YOUR PROJECT'
+    wandb_entity: 'YOUR ENTITY'
+    wandb_tags: []
+    wandb_notes: ''
+
+load_from: ''
